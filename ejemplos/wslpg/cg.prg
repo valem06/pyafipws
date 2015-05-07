@@ -41,7 +41,7 @@ IF LEN(WSAA.Excepcion) > 0 THEN
 	MESSAGEBOX("No se pudo obtener token y sign WSAA")
 ENDIF
 
-ON ERROR DO errhand2;
+*-- ON ERROR DO errhand2;
 
 *-- Crear objeto interface Web Service de Liquidación Primaria de Granos
 WSLPG = CREATEOBJECT("WSLPG")
@@ -65,18 +65,24 @@ IF ! ok Then
     MESSAGEBOX(WSLPG.Traceback, 5 + 48, WSLPG.Excepcion)
 ENDIF
 
+
 *-- Establecer tipo de certificación a autorizar
 tipo_certificado = "P"      &&  cambiar P: primaria, R: retiro, T: transf, E: preexistente
     
 *-- genero una certificación de ejemplo a autorizar (datos generales de cabecera):
 pto_emision = 99
-nro_orden = 1
-nro_planta = "1"
+
+*-- Obtengo el último nro de certificación
+ok = WSLPG.ConsultarCertificacionUltNroOrden(pto_emision)
+nro_orden = WSLPG.NroOrden + 1
+? "Nro. CG: ", nro_orden
+
+nro_planta = "3091"
 nro_ing_bruto_depositario = "20267565393"
 titular_grano = "T"
 cuit_depositante = "20111111112"
 nro_ing_bruto_depositante = "123"
-cuit_corredor = "20222222223"
+cuit_corredor = null && "20222222223"
 cod_grano = 2
 campania = 1314
 datos_adicionales = "Prueba"
@@ -99,33 +105,37 @@ DO CASE
         *-- datos del certificado depósito F1116A:
         ok = WSLPG.SetParametro("nro_act_depositario", "29")
         ok = WSLPG.SetParametro("descripcion_tipo_grano", "SOJA")
-        ok = WSLPG.SetParametro("monto_almacenaje", 1)
-        ok = WSLPG.SetParametro("monto_acarreo", 2)
-        ok = WSLPG.SetParametro("monto_gastos_generales", 3)
-        ok = WSLPG.SetParametro("monto_zarandeo", 4)
-        ok = WSLPG.SetParametro("porcentaje_secado_de", 5)
-        ok = WSLPG.SetParametro("porcentaje_secado_a", 6)
-        ok = WSLPG.SetParametro("monto_secado", 7)
-        ok = WSLPG.SetParametro("monto_por_cada_punto_exceso", 8)
-        ok = WSLPG.SetParametro("monto_otros", 9)
-        ok = WSLPG.SetParametro("analisis_muestra", 10)
-        ok = WSLPG.SetParametro("nro_boletin", 11)
-        ok = WSLPG.SetParametro("valor_grado", 1.02)
-        ok = WSLPG.SetParametro("valor_contenido_proteico", 1)
-        ok = WSLPG.SetParametro("valor_factor", 1)
-        ok = WSLPG.SetParametro("porcentaje_merma_volatil", 15)
-        ok = WSLPG.SetParametro("peso_neto_merma_volatil", 16)
-        ok = WSLPG.SetParametro("porcentaje_merma_secado", 17)
-        ok = WSLPG.SetParametro("peso_neto_merma_secado", 18)
-        ok = WSLPG.SetParametro("porcentaje_merma_zarandeo", 19)
-        ok = WSLPG.SetParametro("peso_neto_merma_zarandeo", 20)
-        ok = WSLPG.SetParametro("peso_neto_certificado", 21)
-        ok = WSLPG.SetParametro("servicios_secado", 22)
-        ok = WSLPG.SetParametro("servicios_zarandeo", 23)
-        ok = WSLPG.SetParametro("servicios_otros", 24)
-        ok = WSLPG.SetParametro("servicios_forma_de_pago", 25)
+        ok = WSLPG.SetParametro("monto_almacenaje", 0)
+        ok = WSLPG.SetParametro("monto_acarreo", 0)
+        ok = WSLPG.SetParametro("monto_gastos_generales", 0)
+        ok = WSLPG.SetParametro("monto_zarandeo", 0)
+        ok = WSLPG.SetParametro("porcentaje_secado_de", 6)
+        ok = WSLPG.SetParametro("porcentaje_secado_a", 5)
+        ok = WSLPG.SetParametro("monto_secado", 0)
+        ok = WSLPG.SetParametro("monto_por_cada_punto_exceso", 0)
+        ok = WSLPG.SetParametro("monto_otros", 0)
+        ok = WSLPG.SetParametro("porcentaje_merma_volatil", 0)
+        ok = WSLPG.SetParametro("peso_neto_merma_volatil", 0)
+        ok = WSLPG.SetParametro("porcentaje_merma_secado", 0)
+        ok = WSLPG.SetParametro("peso_neto_merma_secado", 0)
+        ok = WSLPG.SetParametro("porcentaje_merma_zarandeo", 0)
+        ok = WSLPG.SetParametro("peso_neto_merma_zarandeo", 0)
+        ok = WSLPG.SetParametro("peso_neto_certificado", 10000)
+        ok = WSLPG.SetParametro("servicios_secado", 0)
+        ok = WSLPG.SetParametro("servicios_zarandeo", 0)
+        ok = WSLPG.SetParametro("servicios_otros", 0)
+        ok = WSLPG.SetParametro("servicios_forma_de_pago", 0)
         
         ok = WSLPG.AgregarCertificacionPrimaria()
+        
+        analisis_muestra = 10
+        nro_boletin = 11
+        cod_grado = "F1"
+        valor_grado = 1.02
+        valor_contenido_proteico = 1
+        valor_factor = 1
+
+        ok = WSLPG.AgregarCalidad(analisis_muestra, nro_boletin, cod_grado, valor_grado, valor_contenido_proteico, valor_factor)
     
         descripcion_rubro = "bonif"
         tipo_rubro = "B"
@@ -134,51 +144,53 @@ DO CASE
         ok = WSLPG.AgregarDetalleMuestraAnalisis( ;
             descripcion_rubro, tipo_rubro, porcentaje, valor)
 
-        nro_ctg = "123456"
-        nro_carta_porte = 1000
-        porcentaje_secado_humedad = 1
-        importe_secado = 2
-        peso_neto_merma_secado = 3
-        tarifa_secado = 4
-        importe_zarandeo = 5
-        peso_neto_merma_zarandeo = 6
-        tarifa_zarandeo = 7
+        nro_ctg = "436"
+        nro_carta_porte = "530305318"
+        porcentaje_secado_humedad = 0
+        importe_secado = 0
+        peso_neto_merma_secado = 0
+        tarifa_secado = 0
+        importe_zarandeo = 0
+        peso_neto_merma_zarandeo = 0
+        tarifa_zarandeo = 0
+        peso_neto_confirmado_definitivo = 1000
         ok = WSLPG.AgregarCTG( ;
             nro_ctg, nro_carta_porte, ;
             porcentaje_secado_humedad, importe_secado, ;
             peso_neto_merma_secado, tarifa_secado, ;
             importe_zarandeo, peso_neto_merma_zarandeo, ;
-            tarifa_zarandeo)
+            tarifa_zarandeo, peso_neto_confirmado_definitivo)
 
     CASE INLIST(tipo_certificado, "R", "T")
         *-- establezco datos del certificado retiro/transferencia F1116R/T:
-        cuit_receptor = "20400000000"
+        cuit_receptor = "20111111112"
         fecha = "2014-11-26"
         nro_carta_porte_a_utilizar = "12345"
-        cee_carta_porte_a_utilizar = "123456789012"
+        cee_carta_porte_a_utilizar = "530305322"
         nro_act_depositario = "29"
         ok = WSLPG.AgregarCertificacionRetiroTransferencia( ;
                 nro_act_depositario, cuit_receptor, fecha, ;
                 nro_carta_porte_a_utilizar, ;
                 cee_carta_porte_a_utilizar)
         *-- datos del certificado (los NULL no se utilizan por el momento)
-        ok = WSLPG.SetParametro("peso_neto", 10000)
+        ok = WSLPG.SetParametro("peso_neto", 20000)
         ok = WSLPG.SetParametro("coe_certificado_deposito", "123456789012")
         ok = WSLPG.AgregarCertificado()
         
     CASE INLIST(tipo_certificado, "E")
         *-- establezco datos del certificado preexistente:
         tipo_certificado_deposito_preexistente = 1  && "R" o "T"
-        nro_certificado_deposito_preexistente = "12345"
-        cac_certificado_deposito_preexistente = "123456789012"
+        nro_certificado_deposito_preexistente = "530305327"
+        cac_certificado_deposito_preexistente = "85113524869336"
         fecha_emision_certificado_deposito_preexistente = "2014-11-26"
         peso_neto = 1000
+        nro_planta = 1234
         ok = WSLPG.AgregarCertificacionPreexistente( ;
                 tipo_certificado_deposito_preexistente, ;
                 nro_certificado_deposito_preexistente, ;
                 cac_certificado_deposito_preexistente, ;
                 fecha_emision_certificado_deposito_preexistente, ;
-                peso_neto)
+                peso_neto, nro_planta)
 
 ENDCASE
 
@@ -189,15 +201,37 @@ ok = WSLPG.AutorizarCertificacion()
 IF ok THEN
     *-- muestro los resultados devueltos por el webservice:
     
-    ? "COE", WSLPG.COE
-    ? "Fecha", WSLPG.FechaCertificacion
-    
-    MESSAGEBOX("COE: " + STR(WSLPG.COE), 0, "Autorizar Liquidación:")
+    ? "COE", WSLPG.COE, WSLPG.Estado
+    ? "Fecha", WSLPG.GetParametro("fecha_certificacion")
+
+    *-- Planta (opcional):
+    ? "Nro. Planta", WSLPG.GetParametro("nro_planta")
+    ? "Cuit Titular Planta", WSLPG.GetParametro("cuit_titular_planta")
+    ? "Razon Titular Planta", WSLPG.GetParametro("razon_titular_planta")
+
+    *-- Resumen de pesos (si fue autorizada):
+    ? "peso_bruto_certificado", WSLPG.GetParametro("peso_bruto_certificado")
+    ? "peso_merma_secado", WSLPG.GetParametro("peso_merma_secado")
+    ? "peso_merma_volatil", WSLPG.GetParametro("peso_merma_volatil")
+    ? "peso_merma_zarandeo", WSLPG.GetParametro("peso_merma_zarandeo")
+    ? "peso_neto_certificado", WSLPG.GetParametro("peso_neto_certificado")
+
+    *-- Resumen de servicios (si fue autorizada):
+    ? "importe_iva", WSLPG.GetParametro("importe_iva")
+    ? "servicio_gastos_generales", WSLPG.GetParametro("servicio_gastos_generales")
+    ? "servicio_otros", WSLPG.GetParametro("servicio_otros")
+    ? "servicio_total", WSLPG.GetParametro("servicio_total")
+    ? "servicio_zarandeo", WSLPG.GetParametro("servicio_zarandeo")
+
     ? "Errores", WSLPG.ErrMsg
     IF LEN(WSLPG.ErrMsg) > 0
-	    MESSAGEBOX(WSLPG.ErrMsg, 0, "Autorizar Liquidación:")
+	    MESSAGEBOX(WSLPG.ErrMsg, 0, "Autorizar Certificación:")
 	    ? WSLPG.XmlRequest
     	? WSLPG.XmlResponse
+    ELSE
+        ch = MESSAGEBOX("COE: " + STR(WSLPG.COE), 5, "Autorizar Certificación:")
+        ok = WSLPG.AnularCertificacion(WSLPG.COE)
+        ? "Estado Anulado", WSLPG.Estado
    	ENDIF
 
 ELSE

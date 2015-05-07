@@ -23,6 +23,7 @@ import sys
 import os
 import stat
 import traceback
+import warnings
 from cStringIO import StringIO
 from decimal import Decimal
 from urllib import urlencode
@@ -224,6 +225,7 @@ class BaseWS:
                 proxy_dict = proxy
             else:
                 proxy_dict = parse_proxy(proxy)
+                self.log("Proxy Dict: %s" % str(proxy_dict))
             if self.HOMO or not wsdl:
                 wsdl = self.WSDL
             # agregar sufijo para descargar descripción del servicio ?WSDL o ?wsdl
@@ -232,6 +234,14 @@ class BaseWS:
             if not cache or self.HOMO:
                 # use 'cache' from installation base directory 
                 cache = os.path.join(self.InstallDir, 'cache')
+            # deshabilitar verificación cert. servidor si es nulo falso vacio
+            if not cacert:
+                cacert = None
+            elif cacert is True:
+                # usar certificados predeterminados que vienen en la biblioteca
+                cacert = os.path.join(httplib2.__path__[0], 'cacerts.txt')
+                if not os.path.exists(cacert):
+                    cacert = None   # wrong version, certificates not found...
             self.log("Conectando a wsdl=%s cache=%s proxy=%s" % (wsdl, cache, proxy_dict))
             # analizar espacio de nombres (axis vs .net):
             ns = 'ser' if self.WSDL[-5:] == "?wsdl" else None
@@ -245,6 +255,14 @@ class BaseWS:
                 trace = "--trace" in sys.argv)
             self.cache = cache  # utilizado por WSLPG y WSAA (Ticket de Acceso)
             self.wsdl = wsdl    # utilizado por TrazaMed (para corregir el location)
+            # corrijo ubicación del servidor (puerto http 80 en el WSDL AFIP)
+            for service in self.client.services.values():
+                for port  in service['ports'].values():
+                    location = port['location']
+                    if location and location.startswith("http://"):
+                        warnings.warn("Corrigiendo WSDL ... %s" % location)
+                        location = location.replace("http://", "https://").replace(":80", ":443")
+                        port['location'] = location
             return True
         except:
             ex = traceback.format_exception( sys.exc_type, sys.exc_value, sys.exc_traceback)
@@ -388,8 +406,10 @@ class WebClient:
     "Minimal webservice client to do POST request with multipart encoded FORM data"
 
     def __init__(self, location, enctype="multipart/form-data", trace=False,
-                       cacert=None, ):
+                       cacert=None, timeout=30):
         kwargs = {}
+        if httplib2.__version__ >= '0.3.0':
+                kwargs['timeout'] = timeout
         if httplib2.__version__ >= '0.7.0':
                 kwargs['disable_ssl_certificate_validation'] = cacert is None
                 kwargs['ca_certs'] = cacert
@@ -425,10 +445,13 @@ class WebClient:
         buf = buf.getvalue()
         return boundary, buf
 
-    def __call__(self, **vars):
+    def __call__(self, *args, **vars):
         "Perform a GET/POST request and return the response"
 
         location = self.location
+        # extend the base URI with additional components
+        if args:
+            location += "/".join(args)
         if self.method == "GET":
             location += "?%s" % urlencode(vars)
             
@@ -439,6 +462,8 @@ class WebClient:
         elif self.enctype == "application/x-www-form-urlencoded":
             body = urlencode(vars)
             content_type = self.enctype
+        else:
+            body = None
             
         # add headers according method, cookies, etc.:
         headers={}        
@@ -667,19 +692,19 @@ def guardar_dbf(formatos, agrega=False, conf_dbf=None):
                     r[clave_dbf] = v
             # agregar si lo solicitaron o si la tabla no tiene registros:
             if agrega or not tabla:
-                print "Agregando !!!", r
+                if DEBUG: print "Agregando !!!", r
                 registro = tabla.append(r)
             else:
-                print "Actualizando ", r
+                if DEBUG: print "Actualizando ", r
                 reg = tabla.current()
                 for k, v in reg.scatter_fields().items():
                     if k not in r:
                         r[k] = v
-                print "Actualizando ", r
+                if DEBUG: print "Actualizando ", r
                 reg.write_record(**r)
                 # mover de registro para no actualizar siempre el primero:
                 if not tabla.eof() and len(l) > 1:
-                    print "Moviendo al próximo registro ", tabla.record_number
+                    if DEBUG: print "Moviendo al próximo registro ", tabla.record_number
                     tabla.next()
         tabla.close()
 

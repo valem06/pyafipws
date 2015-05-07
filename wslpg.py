@@ -15,14 +15,14 @@ Liquidación Primaria Electrónica de Granos del web service WSLPG de AFIP
 """
 
 __author__ = "Mariano Reingart <reingart@gmail.com>"
-__copyright__ = "Copyright (C) 2013 Mariano Reingart"
+__copyright__ = "Copyright (C) 2013-2015 Mariano Reingart"
 __license__ = "GPL 3.0"
-__version__ = "1.23d"
+__version__ = "1.25d"
 
 LICENCIA = """
 wslpg.py: Interfaz para generar Código de Operación Electrónica para
 Liquidación Primaria de Granos (LpgService)
-Copyright (C) 2013 Mariano Reingart reingart@gmail.com
+Copyright (C) 2013-2015 Mariano Reingart reingart@gmail.com
 http://www.sistemasagiles.com.ar/trac/wiki/LiquidacionPrimariaGranos
 
 Este progarma es software libre, se entrega ABSOLUTAMENTE SIN GARANTIA
@@ -65,6 +65,10 @@ Opciones:
     --cg --consultar: Consulta una CG por pto_emision, nro_orden o COE
     --cg --ult: Consulta el último Nº LSG emitida (cgConsultarUltimoNroOrden)
   --informar-calidad: Informa la calidad de una CG (cgInformarCalidad)
+  --buscar-ctg: devuelve los datos de la CTG a certificar
+    espera tipo_certificado, cuit_depositante, nro_planta, cod_grano, campania
+  --buscar-cert-con-saldo-disp: CG disponible para liquidar/retirar/transferir
+    espera cuit_depositante, cod_grano, campania, coe fecha_emision_des/has
 
   --provincias: obtiene el listado de provincias
   --localidades: obtiene el listado de localidades por provincia
@@ -198,7 +202,7 @@ ENCABEZADO = [
 
 CERTIFICADO = [
     ('tipo_reg', 1, A), # 1: Certificado
-    ('tipo_certificado_deposito', 2, N), 
+    ('reservado1', 2, N), 		   # en WSLPGv1.7 se amplio el campo
     ('nro_certificado_deposito', 12, N), 
     ('peso_neto', 8, N), 
     ('cod_localidad_procedencia', 6, N), 
@@ -208,6 +212,7 @@ CERTIFICADO = [
     ('fecha_cierre', 10, A),
     ('peso_neto_total_certificado', 8, N), # para ajuste unificado (WSLPGv1.4)
     ('coe_certificado_deposito', 12, N), # para certificacion (WSLPGv1.6)
+    ('tipo_certificado_deposito', 3, N), # wSLPGv1.7 agrega valor 332
     ]
     
 RETENCION = [
@@ -415,7 +420,7 @@ DATO = [
 
 class WSLPG(BaseWS):
     "Interfaz para el WebService de Liquidación Primaria de Granos"    
-    _public_methods_ = ['Conectar', 'Dummy', 'LoadTestXML',
+    _public_methods_ = ['Conectar', 'Dummy', 'SetTicketAcceso', 'DebugLog',
                         'AutorizarLiquidacion',
                         'AutorizarLiquidacionSecundaria', 
                         'AnularLiquidacionSecundaria','AnularLiquidacion',
@@ -440,10 +445,11 @@ class WSLPG(BaseWS):
                         'AgregarCertificacionPreexistente',
                         'AgregarDetalleMuestraAnalisis', 'AgregarCTG',
                         'AutorizarCertificacion', 
-                        'InformarCalidadCertificacion',
+                        'InformarCalidadCertificacion', 'BuscarCTG',
                         'AnularCertificacion',
                         'ConsultarCertificacion',
                         'ConsultarCertificacionUltNroOrden',
+                        'BuscarCertConSaldoDisponible',
                         'LeerDatosLiquidacion',
                         'ConsultarCampanias',
                         'ConsultarTipoGrano',
@@ -459,8 +465,8 @@ class WSLPG(BaseWS):
                         'ConsultarLocalidadesPorProvincia',
                         'ConsultarTiposOperacion',
                         'BuscarLocalidades',
-                        'AnalizarXml', 'ObtenerTagXml',
-                        'SetParametro', 'GetParametro',
+                        'AnalizarXml', 'ObtenerTagXml', 'LoadTestXML',
+                        'SetParametros', 'SetParametro', 'GetParametro', 
                         'CargarFormatoPDF', 'AgregarCampoPDF', 'AgregarDatoPDF',
                         'CrearPlantillaPDF', 'ProcesarPlantillaPDF', 
                         'GenerarPDF', 'MostrarPDF',
@@ -470,7 +476,7 @@ class WSLPG(BaseWS):
         'Excepcion', 'ErrCode', 'ErrMsg', 'LanzarExcepciones', 'Errores',
         'XmlRequest', 'XmlResponse', 'Version', 'Traceback', 'InstallDir',
         'COE', 'COEAjustado', 'Estado', 'Resultado', 'NroOrden',
-        'TotalDeduccion', 'TotalRetencion', 'TotalRetencionAfip', 
+        'TotalDeduccion', 'TotalRetencion', 'TotalRetencionAfip',
         'TotalOtrasRetenciones', 'TotalNetoAPagar', 'TotalPagoSegunCondicion',
         'TotalIvaRg2300_07', 'Subtotal', 'TotalIva105', 'TotalIva21',
         'TotalRetencionesGanancias', 'TotalRetencionesIVA', 'NroContrato',
@@ -500,6 +506,8 @@ class WSLPG(BaseWS):
         self.TotalPagoSegunCondicion = ""
         self.Subtotal = self.TotalIva105 = self.TotalIva21 = ""
         self.TotalRetencionesGanancias = self.TotalRetencionesIVA = ""
+        self.TotalPercepcion = ""
+        self.FechaCertificacion = ""
         self.datos = {}
 
     @inicializar_y_capturar_excepciones
@@ -528,7 +536,6 @@ class WSLPG(BaseWS):
             except Exception, e:
                 print "ADVERTENCIA: No se pudo abrir la bbdd de localidades:", e
                 self.Excepcion = str(e)
-            
         return ok
 
     def __analizar_errores(self, ret):
@@ -591,8 +598,6 @@ class WSLPG(BaseWS):
             cuit_corredor = None
             comision_corredor = None
             nro_ing_bruto_corredor = None
-        elif es_liquidacion_propia == "N" and liquida_corredor == "N":
-            nro_ing_bruto_corredor = None           # validación 1623
         
         # si no corresponde elimino el peso neto certificado campo opcional
         if not peso_neto_sin_certificado or not int(peso_neto_sin_certificado):
@@ -660,6 +665,8 @@ class WSLPG(BaseWS):
         # inicializo las listas que contentran las retenciones y deducciones:
         self.retenciones = []
         self.deducciones = []
+        # limpio las estructuras internas no utilizables en este caso
+        self.certificacion = None
         return True
 
     @inicializar_y_capturar_excepciones
@@ -719,6 +726,11 @@ class WSLPG(BaseWS):
         # limpio campos opcionales:
         if not peso_neto_total_certificado:
             peso_neto_total_certificado = None  # 0 no es válido
+        # coe_certificado_deposito no es para LPG, unificar en futuras versiones
+        if tipo_certificado_deposito and int(tipo_certificado_deposito) == 332:
+            if coe_certificado_deposito and long(coe_certificado_deposito):
+                nro_certificado_deposito = coe_certificado_deposito
+                coe_certificado_deposito = None
         cert = dict(
                         tipoCertificadoDeposito=tipo_certificado_deposito,
                         nroCertificadoDeposito=nro_certificado_deposito,
@@ -730,7 +742,7 @@ class WSLPG(BaseWS):
                         pesoNetoTotalCertificado=peso_neto_total_certificado,
                         coeCertificadoDeposito=coe_certificado_deposito,
                       )
-        if not coe_certificado_deposito:
+        if self.liquidacion:
             self.liquidacion['certificados'].append({'certificado': cert})
         else:
             self.certificacion['retiroTransferencia']['certificadoDeposito'] = cert
@@ -989,7 +1001,7 @@ class WSLPG(BaseWS):
             self.params_out['total_pago_segun_condicion'] = self.TotalPagoSegunCondicion
 
             # datos adicionales:
-            self.params_out['nro_orden'] = aut.get('nroOrden')
+            self.NroOrden = self.params_out['nro_orden'] = aut.get('nroOrden')
             self.params_out['cod_tipo_ajuste'] = aut.get('codTipoAjuste')
             fecha = aut.get('fechaLiquidacion')
             if fecha:
@@ -1410,6 +1422,8 @@ class WSLPG(BaseWS):
                 campania=campania,
                 datosAdicionales=datos_adicionales,                 # opcional
             )
+        # limpio las estructuras internas no utilizables en este caso
+        self.liquidacion = None
         return True
 
     @inicializar_y_capturar_excepciones
@@ -1526,6 +1540,48 @@ class WSLPG(BaseWS):
         return True
 
     @inicializar_y_capturar_excepciones
+    def BuscarCTG(self, tipo_certificado="P", cuit_depositante=None,
+                        nro_planta=None, cod_grano=2, campania=1314, 
+                        nro_ctg=None, tipo_ctg=None, nro_carta_porte=None,
+                        fecha_confirmacion_ctg_des=None,
+                        fecha_confirmacion_ctg_has=None,
+                 ):
+        "Devuelve los CTG/Carta de porte que se puede incluir en un certificado"
+        ret = self.client.cgBuscarCtg(
+                    auth={
+                        'token': self.Token, 'sign': self.Sign,
+                        'cuit': self.Cuit, },
+                    tipoCertificado=tipo_certificado,
+                    cuitDepositante=cuit_depositante or self.Cuit,
+                    nroPlanta=nro_planta,
+                    codGrano=cod_grano, campania=campania,
+                    nroCtg=nro_ctg, tipoCtg=tipo_ctg,
+                    nroCartaPorte=nro_carta_porte,
+                    fechaConfirmacionCtgDes=fecha_confirmacion_ctg_des,
+                    fechaConfirmacionCtgHas=fecha_confirmacion_ctg_has,
+                        )['oReturn']
+        self.__analizar_errores(ret)
+        array = ret.get('ctg', [])
+        self.Excepcion = self.Traceback = ""
+        self.params_out['ctgs'] = []
+        for ctg in array:
+            self.params_out['ctgs'].append({
+                'campania': ctg.get('campania'),
+                'nro_planta': ctg.get('nroPlanta'),
+                'nro_ctg': ctg.get('nroCtg'),
+                'tipo_ctg': ctg.get('tipoCtg'),
+                'nro_carta_porte': ctg.get('nroCartaPorte'),
+                'kilos_confirmados': ctg.get('kilosConfirmados'),
+                'fecha_confirmacion_ctg': ctg.get('fechaConfirmacionCtg'),
+                'cod_grano': ctg.get('codGrano'),
+                'cuit_remitente_comercial': ctg.get('cuitRemitenteComercial'),
+                'cuit_liquida': ctg.get('cuitLiquida'),
+                'cuit_certifica': ctg.get('cuitCertifica'),
+                })
+        return True
+
+
+    @inicializar_y_capturar_excepciones
     def AgregarCTG(self, nro_ctg=None, nro_carta_porte=None,
                          porcentaje_secado_humedad=None, importe_secado=None,
                          peso_neto_merma_secado=None, tarifa_secado=None,
@@ -1548,6 +1604,42 @@ class WSLPG(BaseWS):
                 tarifaZarandeo=tarifa_zarandeo,
             )
         self.certificacion['primaria']['ctg'].append(ctg)
+        return True
+
+    @inicializar_y_capturar_excepciones
+    def BuscarCertConSaldoDisponible(self, cuit_depositante=None,
+                        cod_grano=2, campania=1314, coe=None, 
+                        fecha_emision_des=None,
+                        fecha_emision_has=None,
+                 ):
+        """Devuelve los certificados de depósito en los que un productor tiene
+        saldo disponible para Liquidar/Retirar/Transferir"""
+        
+        ret = self.client.cgBuscarCertConSaldoDisponible(
+                    auth={
+                        'token': self.Token, 'sign': self.Sign,
+                        'cuit': self.Cuit, },
+                    cuitDepositante=cuit_depositante or self.Cuit,
+                    codGrano=cod_grano, campania=campania,
+                    coe=coe,
+                    fechaEmisionDes=fecha_emision_des,
+                    fechaEmisionHas=fecha_emision_has,
+                        )['oReturn']
+        self.__analizar_errores(ret)
+        array = ret.get('certificado', [])
+        self.Excepcion = self.Traceback = ""
+        self.params_out['certificados'] = []
+        for cert in array:
+            self.params_out['certificados'].append(dict(
+                coe=cert['coe'],
+                tipo_certificado=cert['tipoCertificado'],
+                campania=cert['campania'],
+                cuit_depositante=cert['cuitDepositante'],
+                cuit_depositario=cert['cuitDepositario'],
+                nro_planta=cert['nroPlanta'],
+                kilos_disponibles=cert['kilosDisponibles'],
+                cod_grano=cert['codGrano'],
+            ))
         return True
 
     @inicializar_y_capturar_excepciones
@@ -1685,7 +1777,8 @@ class WSLPG(BaseWS):
             self.params_out['nro_carta_porte_a_utilizar'] = rt.get('nroCartaPorteAUtilizar')
             # sub estructuras:
             self.params_out['certificados'] = []
-            for cert in rt.get("certificadoDeposito", []):
+            cert = rt.get("certificadoDeposito")
+            if cert:
                 self.params_out['certificados'].append({
                     'coe_certificado_deposito': cert.get('coeCertificadoDeposito'),
                     'peso_neto': cert.get('pesoNeto'),
@@ -1789,7 +1882,8 @@ class WSLPG(BaseWS):
         return True
     
     @inicializar_y_capturar_excepciones
-    def ConsultarLiquidacion(self, pto_emision=None, nro_orden=None, coe=None):
+    def ConsultarLiquidacion(self, pto_emision=None, nro_orden=None, coe=None, 
+                                   pdf=None):
         "Consulta una liquidación por No de orden"
         if coe:
             ret = self.client.liquidacionXCoeConsultar(
@@ -1797,6 +1891,7 @@ class WSLPG(BaseWS):
                             'token': self.Token, 'sign': self.Sign,
                             'cuit': self.Cuit, },
                         coe=coe,
+                        pdf='S' if pdf else 'N',
                         )
         else:
             ret = self.client.liquidacionXNroOrdenConsultar(
@@ -1812,10 +1907,14 @@ class WSLPG(BaseWS):
             aut = ret['autorizacion']
             liq = ret['liquidacion']
             self.AnalizarLiquidacion(aut, liq)
+        # guardo el PDF si se indico archivo y vino en la respuesta:
+        if pdf and 'pdf' in ret:
+            open(pdf, "wb").write(ret['pdf'])
         return True
 
     @inicializar_y_capturar_excepciones
-    def ConsultarLiquidacionSecundaria(self, pto_emision=None, nro_orden=None, coe=None):
+    def ConsultarLiquidacionSecundaria(self, pto_emision=None, nro_orden=None, 
+                                             coe=None, pdf=None):
         "Consulta una liquidación sequndaria por No de orden o coe"
         if coe:
             ret = self.client.lsgConsultarXCoe(
@@ -1823,6 +1922,7 @@ class WSLPG(BaseWS):
                             'token': self.Token, 'sign': self.Sign,
                             'cuit': self.Cuit, },
                         coe=coe,
+                        pdf='S' if pdf else 'N',
                         )
         else:
             ret = self.client.lsgConsultarXNroOrden(
@@ -1838,10 +1938,14 @@ class WSLPG(BaseWS):
             aut = ret['autorizacion']
             liq = ret['liquidacion']
             self.AnalizarLiquidacion(aut, liq)
+        # guardo el PDF si se indico archivo y vino en la respuesta:
+        if pdf and 'pdf' in ret:
+            open(pdf, "wb").write(ret['pdf'])
         return True
 
     @inicializar_y_capturar_excepciones
-    def ConsultarCertificacion(self, pto_emision=None, nro_orden=None, coe=None):
+    def ConsultarCertificacion(self, pto_emision=None, nro_orden=None, 
+                                     coe=None, pdf=None):
         "Consulta una certificacion por No de orden o COE"
         if coe:
             ret = self.client.cgConsultarXCoe(
@@ -1849,6 +1953,7 @@ class WSLPG(BaseWS):
                             'token': self.Token, 'sign': self.Sign,
                             'cuit': self.Cuit, },
                         coe=coe,
+                        pdf='S' if pdf else 'N',
                         )
         else:
             ret = self.client.cgConsultarXNroOrden(
@@ -1862,6 +1967,9 @@ class WSLPG(BaseWS):
         self.__analizar_errores(ret)
         if 'autorizacion' in ret:
             self.AnalizarAutorizarCertificadoResp(ret)
+        # guardo el PDF si se indico archivo y vino en la respuesta:
+        if pdf and 'pdf' in ret:
+            open(pdf, "wb").write(ret['pdf'])
         return True
 
     @inicializar_y_capturar_excepciones
@@ -2317,6 +2425,11 @@ class WSLPG(BaseWS):
 
     def AgregarDatoPDF(self, campo, valor, pagina='T'):
         "Agrego un dato a la factura (internamente)"
+        # corrijo path relativo para las imágenes (compatibilidad hacia atrás):
+        if campo == 'fondo' and valor.startswith(self.InstallDir):
+            if not os.path.exists(valor):
+                valor = os.path.join(self.InstallDir, "plantillas", os.path.basename(valor))
+            if DEBUG: print "NUEVO PATH:", valor          
         self.datos[campo] = valor
         return True
 
@@ -2708,7 +2821,11 @@ def leer_archivo(nombre_archivo):
                 # referenciar la liquidación para agregar ret. / ded.:
                 liq = dic
             elif str(linea[0])=='1':
-                dic['certificados'].append(leer(linea, CERTIFICADO))
+                d = leer(linea, CERTIFICADO)
+                if d['reservado1']:
+                    print "ADVERTENCIA: USAR tipo_certificado_deposito (nueva posición)" 
+                    d['tipo_certificado_deposito'] = d['reservado1'] 
+                dic['certificados'].append(d)
             elif str(linea[0])=='2':
                 liq['retenciones'].append(leer(linea, RETENCION))
             elif str(linea[0])=='3':
@@ -2900,7 +3017,7 @@ if __name__ == '__main__':
                     precio_operacion=None,  # para probar ajustar
                     total_peso_neto=1000,   # para probar ajustar
                     certificados=[dict(   
-                        tipo_certificado_deposito=5,
+                        tipo_certificado_deposito=5,  # 332 p/ cert. electronico
                         nro_certificado_deposito=555501200729,
                         peso_neto=1000,
                         cod_localidad_procedencia=3,
@@ -3313,11 +3430,12 @@ if __name__ == '__main__':
         if '--consultar' in sys.argv:
             pto_emision = None
             nro_orden = 0
-            coe = None
+            coe = pdf = None
             try:
                 pto_emision = sys.argv[sys.argv.index("--consultar") + 1]
                 nro_orden = sys.argv[sys.argv.index("--consultar") + 2]
                 coe = sys.argv[sys.argv.index("--consultar") + 3]
+                pdf = sys.argv[sys.argv.index("--consultar") + 4]
             except IndexError:
                 pass
             if '--testing' in sys.argv:
@@ -3326,11 +3444,11 @@ if __name__ == '__main__':
                 wslpg.LoadTestXML("wslpg_cons_test.xml")     # cargo prueba
             print "Consultando: pto_emision=%s nro_orden=%s coe=%s" % (pto_emision, nro_orden, coe)
             if '--lsg' in sys.argv:
-                ret = wslpg.ConsultarLiquidacionSecundaria(pto_emision=pto_emision, nro_orden=nro_orden, coe=coe)
+                ret = wslpg.ConsultarLiquidacionSecundaria(pto_emision=pto_emision, nro_orden=nro_orden, coe=coe, pdf=pdf)
             if '--cg' in sys.argv:
-                ret = wslpg.ConsultarCertificacion(pto_emision=pto_emision, nro_orden=nro_orden, coe=coe)
+                ret = wslpg.ConsultarCertificacion(pto_emision=pto_emision, nro_orden=nro_orden, coe=coe, pdf=pdf)
             else:
-                ret = wslpg.ConsultarLiquidacion(pto_emision=pto_emision, nro_orden=nro_orden, coe=coe)
+                ret = wslpg.ConsultarLiquidacion(pto_emision=pto_emision, nro_orden=nro_orden, coe=coe, pdf=pdf)
             print "COE", wslpg.COE
             print "Estado", wslpg.Estado
             print "Errores:", wslpg.Errores
@@ -3485,15 +3603,18 @@ if __name__ == '__main__':
         if '--autorizar-cg' in sys.argv:
         
             if '--prueba' in sys.argv:
+                # consulto ultimo numero de orden
+                pto_emision = 99
+                wslpg.ConsultarCertificacionUltNroOrden(pto_emision)
                 # genero una certificación de ejemplo a autorizar:
                 dic = dict(
-                        pto_emision=99, nro_orden=1,  
-                        tipo_certificado="P", nro_planta="1",
+                        pto_emision=pto_emision, nro_orden=wslpg.NroOrden + 1,  
+                        tipo_certificado="P", nro_planta="3091",
                         nro_ing_bruto_depositario="20267565393",
                         titular_grano="T",
                         cuit_depositante='20111111112',  
                         nro_ing_bruto_depositante='123',
-                        cuit_corredor='20222222223',
+                        cuit_corredor=None if '--sincorr' in sys.argv else '20222222223',
                         cod_grano=2, campania=1314,
                         datos_adicionales="Prueba",)
            
@@ -3538,15 +3659,15 @@ if __name__ == '__main__':
                     rt = dict(
                             nro_act_depositario=29,
                             tipo_certificado="R",
-                            cuit_receptor="20400000000",
+                            cuit_receptor="20267565393",
                             fecha="2014-11-26", 
-                            nro_carta_porte_a_utilizar="12345",
+                            nro_carta_porte_a_utilizar="530305323",
                             cee_carta_porte_a_utilizar="123456789012",
                             )
                     dic.update(rt)
                     cert = dict(
                            peso_neto=10000,
-                           coe_certificado_deposito="123456789012", 
+                           coe_certificado_deposito="332000000357", 
                         )
                     dic['certificados'] = [cert]
 
@@ -3554,10 +3675,10 @@ if __name__ == '__main__':
                     pre = dict(
                             tipo_certificado="E",
                             tipo_certificado_deposito_preexistente=1, # "R" o "T"
-                            nro_certificado_deposito_preexistente="12345",
-                            cac_certificado_deposito_preexistente="123456789012",
+                            nro_certificado_deposito_preexistente="530305327",
+                            cac_certificado_deposito_preexistente="85113524869336",
                             fecha_emision_certificado_deposito_preexistente="2014-11-26",
-                            peso_neto=1000, nro_planta=1,
+                            peso_neto=10000, nro_planta=3091,
                             )
                     dic.update(pre)
 
@@ -3638,6 +3759,46 @@ if __name__ == '__main__':
             dic.update(wslpg.params_out)
             escribir_archivo(dic, SALIDA, agrega=('--agrega' in sys.argv))  
 
+        # consultar CTG a certificar en una CG:
+        
+        if '--buscar-ctg' in sys.argv:
+            argv = dict([(i, e) for i, e 
+                         in enumerate(sys.argv[sys.argv.index("--buscar-ctg")+1:]) 
+                         if not e.startswith("--")])
+            tipo_certificado = argv.get(0, "P") # P
+            cuit_depositante = argv.get(1)      # 
+            nro_planta = argv.get(2, 3091)      
+            cod_grano  = argv.get(3, 2)
+            campania = argv.get(4, 1314)
+            ret = wslpg.BuscarCTG(tipo_certificado, cuit_depositante, 
+                                  nro_planta, cod_grano, campania)
+            pprint.pprint(wslpg.params_out)
+            if DEBUG:
+                print "NRO CTG", wslpg.GetParametro("ctgs", 0, "nro_ctg")
+
+        # consultar certificados con saldo disponible para liquidar/transferir:
+        
+        if '--buscar-cert-con-saldo-disp' in sys.argv:
+            argv = dict([(i, e) for i, e 
+                         in enumerate(sys.argv[sys.argv.index("--buscar-cert-con-saldo-disp")+1:]) 
+                         if not e.startswith("--")])
+            cuit_depositante = argv.get(0)      # por defecto usa el CUIT .ini
+            cod_grano = argv.get(1, 2)          # 
+            campania = argv.get(2, 1314)
+            coe = argv.get(3)
+            fecha_emision_des = argv.get(4)
+            fecha_emision_has = argv.get(5)
+            if '--testing' in sys.argv:
+                wslpg.LoadTestXML("wslpg_resp_buscar_cert.xml")  # cargo respuesta
+            ret = wslpg.BuscarCertConSaldoDisponible(cuit_depositante,
+                        cod_grano, campania, coe, 
+                        fecha_emision_des, fecha_emision_has,
+                 )
+            pprint.pprint(wslpg.params_out)
+            print wslpg.ErrMsg
+            if DEBUG:
+                print "1er COE", wslpg.GetParametro("certificados", 0, "coe")
+            
         # Recuperar parámetros:
         
         if '--campanias' in sys.argv:
