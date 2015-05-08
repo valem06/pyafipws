@@ -3563,7 +3563,7 @@ if __name__ == '__main__':
                     opcionales=[{'codigo': 1, 
                                  'descripcion': 'previsto para info adic.'}],
                 )
-                escribir_archivo(dic, ENTRADA, agrega=False)
+                escribir_archivo(dic, ENTRADA, agrega=('--agrega' in sys.argv))
             dic = leer_archivo(ENTRADA)
             
             # cargo la liquidación:
@@ -3686,7 +3686,7 @@ if __name__ == '__main__':
                             )
                     dic.update(pre)
 
-                escribir_archivo(dic, ENTRADA, agrega=False)
+                escribir_archivo(dic, ENTRADA, agrega=('--agrega' in sys.argv))
             dic = leer_archivo(ENTRADA)
             
             # cargar los datos según el tipo de certificación:

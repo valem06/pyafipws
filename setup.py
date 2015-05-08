@@ -36,7 +36,7 @@ import wsmtx, recem
 import pyfepdf
 import pyemail
 import pyi25
-#import wsctgv2
+#import wsctgv3
 #import wslpg
 #import wscoc
 #import wscdc
@@ -90,10 +90,13 @@ if sys.version_info > (2, 7):
             )]
     # fix permission denied runtime error on win32com.client.gencache.GenGeneratePath
     # (expects a __init__.py not pyc, also dicts.dat pickled or _LoadDicts/_SaveDicts will fail too)
-    data_files += [(
+	# NOTE: on windows 8.1 64 bits, this is stored in C:\Users\REINGART\AppData\\Local\Temp\gen_py\2.7
+	from win32com.client import gencache
+	gen_py_path = gencache.GetGeneratePath() or "C:\Python27\lib\site-packages\win32com\gen_py"
+	data_files += [(
             r"win32com\gen_py", 
-            [r"c:\Python27\Lib\site-packages\win32com\gen_py\__init__.py",
-             r"c:\Python27\Lib\site-packages\win32com\gen_py\dicts.dat", ],
+            [os.path.join(gen_py_path, "__init__.py"),
+             os.path.join(gen_py_path, "dicts.dat")],
             )]
     
     sys.path.insert(0, r"C:\Python27\Lib\site-packages\pythonwin")
@@ -314,15 +317,15 @@ if 'py2exe' in sys.argv:
             Target(module=designer, script="designer.py", dest_base="designer"),
             ]
             
-    if 'wsctgv2' in globals():
+    if 'wsctgv3' in globals():
         kwargs['com_server'] += [
-            Target(module=wsctgv2, modules="wsctgv2"), 
+            Target(module=wsctgv3, modules="wsctgv3"), 
             ]
         kwargs['console'] += [
-            Target(module=wsctgv2, script='wsctgv2.py', dest_base="wsctgv2_cli"),
+            Target(module=wsctgv3, script='wsctgv3.py', dest_base="wsctgv3_cli"),
             ]
-        __version__ += "+wsctgv2_" + wsctgv2.__version__
-        HOMO &= wsctgv2.HOMO
+        __version__ += "+wsctgv3_" + wsctgv3.__version__
+        HOMO &= wsctgv3.HOMO
 
     if 'wslpg' in globals():
         kwargs['com_server'] += [
